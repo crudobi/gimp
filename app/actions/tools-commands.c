@@ -30,6 +30,7 @@
 #include "core/gimpcontainer.h"
 #include "core/gimpcontext.h"
 #include "core/gimptoolinfo.h"
+#include "core/gimptoolgroup.h"
 
 #include "paint/gimpinkoptions.h"
 #include "paint/gimpairbrushoptions.h"
@@ -111,6 +112,33 @@ tools_select_cmd_callback (GimpAction *action,
   tool_info = gimp_get_tool_info (gimp, tool_name);
 
   context = gimp_get_user_context (gimp);
+
+  /*  Pressing the shortcut of a tool whose group is already active
+   *  cycles to the next tool in that group (Photoshop-style tool
+   *  cycling): the shortcut of any member of the active group advances
+   *  from the currently active member, so repeated taps walk the whole
+   *  group. Pressing the shortcut of a tool in a different group still
+   *  selects that tool, as before.
+   */
+  if (tool_info)
+    {
+      GimpToolInfo *active_tool = gimp_context_get_tool (context);
+      GimpViewable *active_parent = active_tool ?
+        gimp_viewable_get_parent (GIMP_VIEWABLE (active_tool)) : NULL;
+      GimpViewable *parent =
+        gimp_viewable_get_parent (GIMP_VIEWABLE (tool_info));
+
+      if (active_parent && parent && active_parent == parent &&
+          GIMP_IS_TOOL_GROUP (parent))
+        {
+          GimpToolInfo *next_info =
+            gimp_tool_group_get_next_tool_info (GIMP_TOOL_GROUP (parent),
+                                               active_tool);
+
+          if (next_info)
+            tool_info = next_info;
+        }
+    }
 
   /*  always allocate a new tool when selected from the image menu
    */

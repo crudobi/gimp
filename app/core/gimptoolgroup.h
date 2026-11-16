@@ -61,3 +61,5 @@ const gchar   * gimp_tool_group_get_active_tool      (GimpToolGroup *tool_group)
 void            gimp_tool_group_set_active_tool_info (GimpToolGroup *tool_group,
                                                       GimpToolInfo  *tool_info);
 GimpToolInfo  * gimp_tool_group_get_active_tool_info (GimpToolGroup *tool_group);
+GimpToolInfo  * gimp_tool_group_get_next_tool_info   (GimpToolGroup *tool_group,
+                                                      GimpToolInfo  *tool_info);

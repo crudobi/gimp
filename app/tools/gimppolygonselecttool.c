@@ -326,15 +326,17 @@ gimp_polygon_select_tool_modifier_key (GimpTool        *tool,
   if (priv->widget && display == tool->display)
     {
       gimp_tool_widget_hover_modifier (priv->widget, key, press, state);
-
-      /* let GimpSelectTool handle alt+<mod> */
-      if (! (state & GDK_MOD1_MASK))
-        {
-          /* otherwise, shift/ctrl are handled by the widget */
-          state &= ~(gimp_get_extend_selection_mask () |
-                     gimp_get_modify_selection_mask ());
-        }
     }
+
+  /*  Do not mask Shift/Ctrl out of the state passed to the parent:
+   *  GimpSelectionTool's modifier-key handler sets the selection
+   *  operation (Add/Subtract/Intersect) from the modifiers, and the
+   *  Free Select commit uses that operation. Masking them made
+   *  Shift/Ctrl a no-op for the operation while the polygon widget
+   *  was active, so Shift+lasso could never add. The widget already
+   *  received the unmasked state above, so its own Shift handling is
+   *  unaffected.
+   */
 
   GIMP_TOOL_CLASS (parent_class)->modifier_key (tool, key, press, state,
                                                 display);

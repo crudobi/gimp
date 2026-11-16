@@ -408,3 +408,42 @@ gimp_tool_group_get_active_tool_info (GimpToolGroup *tool_group)
     gimp_container_get_child_by_name (tool_group->priv->children,
                                       tool_group->priv->active_tool));
 }
+
+GimpToolInfo *
+gimp_tool_group_get_next_tool_info (GimpToolGroup *tool_group,
+                                    GimpToolInfo  *tool_info)
+{
+  GList *children;
+  GList *iter;
+
+  g_return_val_if_fail (GIMP_IS_TOOL_GROUP (tool_group), NULL);
+  g_return_val_if_fail (GIMP_IS_TOOL_INFO (tool_info), NULL);
+
+  children = GIMP_LIST (tool_group->priv->children)->queue->head;
+
+  /*  Find the current tool in the group  */
+  for (iter = children; iter; iter = g_list_next (iter))
+    {
+      if (iter->data == tool_info)
+        break;
+    }
+
+  if (! iter)
+    return tool_info;
+
+  /*  Advance to the next visible tool, wrapping around to the first
+   *  child. If no other tool in the group is visible, the current tool
+   *  is returned, i.e. no cycling.
+   */
+  do
+    {
+      iter = g_list_next (iter);
+
+      if (! iter)
+        iter = children;
+    }
+  while (iter->data != tool_info &&
+         ! gimp_tool_item_get_visible (GIMP_TOOL_ITEM (iter->data)));
+
+  return GIMP_TOOL_INFO (iter->data);
+}
