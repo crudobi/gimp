@@ -193,18 +193,18 @@ gimp_free_select_tool_modifier_key (GimpTool        *tool,
   GIMP_TOOL_CLASS (parent_class)->modifier_key (tool, key, press, state,
                                                 display);
 
-  /*  If a polygon is in progress and the user holds Shift or Ctrl, the
-   *  selection operation follows the modifier (Photoshop: Shift+lasso
-   *  adds to the selection, Ctrl+lasso subtracts), even when the
-   *  modifier is pressed mid-stroke. The operation is latched into
-   *  operation_at_start, so releasing the key before committing does
-   *  not lose it; the commit then uses the latched operation. Alt is
-   *  excluded: while Alt is held GIMP pretends no modifier is down.
+  /*  If a polygon is in progress and the user holds Shift, Ctrl or Alt,
+   *  the selection operation follows the modifier (Photoshop: Shift+lasso
+   *  adds to the selection, Ctrl+lasso subtracts, Alt+lasso subtracts),
+   *  even when the modifier is pressed mid-stroke. The operation is
+   *  latched into operation_at_start, so releasing the key before
+   *  committing does not lose it; the commit then uses the latched
+   *  operation.
    */
   if (priv->started &&
       (state & (gimp_get_extend_selection_mask () |
-                gimp_get_modify_selection_mask ())) &&
-      ! (state & GDK_MOD1_MASK))
+                gimp_get_modify_selection_mask () |
+                GDK_MOD1_MASK)))
     {
       options = GIMP_SELECTION_TOOL_GET_OPTIONS (tool);
 

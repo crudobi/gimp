@@ -574,18 +574,24 @@ gimp_foreground_select_tool_modifier_key (GimpTool        *tool,
     }
   else
     {
-#if 0
-      if (key == gimp_get_toggle_behavior_mask ())
+      /*  Ctrl toggles foreground/background while painting the trimap.
+       *  The toggle must fire on press only: modifier_key is called on
+       *  both press and release, so an unguarded toggle would flip twice
+       *  per tap and do nothing. (This block was #if 0'd upstream.)
+       */
+      if (press && key == gimp_get_toggle_behavior_mask ())
         {
           GimpForegroundSelectOptions *options;
 
           options = GIMP_FOREGROUND_SELECT_TOOL_GET_OPTIONS (tool);
 
           g_object_set (options,
-                        "background", ! options->background,
+                        "draw-mode",
+                        options->draw_mode == GIMP_MATTING_DRAW_MODE_FOREGROUND ?
+                          GIMP_MATTING_DRAW_MODE_BACKGROUND :
+                          GIMP_MATTING_DRAW_MODE_FOREGROUND,
                         NULL);
         }
-#endif
     }
 }
 

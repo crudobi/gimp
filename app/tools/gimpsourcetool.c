@@ -199,7 +199,9 @@ gimp_source_tool_button_press (GimpTool            *tool,
 
   gimp_draw_tool_pause (GIMP_DRAW_TOOL (tool));
 
-  if ((state & (toggle_mask | extend_mask)) == toggle_mask)
+  /*  Alt sets the source just like Ctrl. */
+  if (((state & (toggle_mask | extend_mask)) == toggle_mask) ||
+      ((state & (GDK_MOD1_MASK | extend_mask)) == GDK_MOD1_MASK))
     {
       source->set_source = TRUE;
 
@@ -256,7 +258,7 @@ gimp_source_tool_modifier_key (GimpTool        *tool,
 
   if (gimp_source_core_use_source (GIMP_SOURCE_CORE (paint_tool->core),
                                    options) &&
-      key == gimp_get_toggle_behavior_mask ())
+      (key == gimp_get_toggle_behavior_mask () || key == GDK_MOD1_MASK))
     {
       gimp_draw_tool_pause (GIMP_DRAW_TOOL (tool));
 
@@ -305,7 +307,8 @@ gimp_source_tool_cursor_update (GimpTool         *tool,
       GdkModifierType extend_mask = gimp_get_extend_selection_mask ();
       GdkModifierType toggle_mask = gimp_get_toggle_behavior_mask ();
 
-      if ((state & (toggle_mask | extend_mask)) == toggle_mask)
+      if (((state & (toggle_mask | extend_mask)) == toggle_mask) ||
+          ((state & (GDK_MOD1_MASK | extend_mask)) == GDK_MOD1_MASK))
         {
           cursor = GIMP_CURSOR_CROSSHAIR_SMALL;
         }
@@ -352,7 +355,7 @@ gimp_source_tool_oper_update (GimpTool         *tool,
         {
           GdkModifierType toggle_mask = gimp_get_toggle_behavior_mask ();
 
-          if (state & toggle_mask)
+          if (state & (toggle_mask | GDK_MOD1_MASK))
             {
               gimp_tool_replace_status (tool, display, "%s",
                                         source_tool->status_set_source);

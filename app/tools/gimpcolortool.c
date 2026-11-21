@@ -362,11 +362,13 @@ gimp_color_tool_cursor_update (GimpTool         *tool,
 {
   GimpColorTool *color_tool = GIMP_COLOR_TOOL (tool);
 
-  /* paint and bucket fill tools temporarily enable color picking with Ctrl.
-     If the release event is missed, e.g. when duplicating with Ctrl + D,
-     the picker cursor would stick forever, so recover here. See: #14290 */
+  /* paint and bucket fill tools temporarily enable color picking with Ctrl
+     or Alt. If the release event is missed, e.g. when duplicating with
+     Ctrl + D, the picker cursor would stick forever, so recover here.
+     See: #14290 */
   if (color_tool->enabled                             &&
       ! (state & gimp_get_constrain_behavior_mask ()) &&
+      ! (state & GDK_MOD1_MASK)                       &&
       ! GIMP_IS_COLOR_PICKER_TOOL (tool)              &&
       ! GIMP_IS_FILTER_TOOL (tool))
     {

@@ -335,7 +335,8 @@ gimp_polygon_select_tool_modifier_key (GimpTool        *tool,
    *  Shift/Ctrl a no-op for the operation while the polygon widget
    *  was active, so Shift+lasso could never add. The widget already
    *  received the unmasked state above, so its own Shift handling is
-   *  unaffected.
+   *  unaffected. Alt is passed through the same way, so Alt+lasso
+   *  subtracts.
    */
 
   GIMP_TOOL_CLASS (parent_class)->modifier_key (tool, key, press, state,
@@ -356,7 +357,10 @@ gimp_polygon_select_tool_oper_update (GimpTool         *tool,
     {
       gimp_tool_widget_hover (priv->widget, coords, state, proximity);
 
-      /* let GimpSelectTool handle alt+<mod> */
+      /*  With Alt held, let GimpSelectionTool see the state as-is
+       *  (Alt is a selection modifier now); otherwise, shift/ctrl
+       *  are handled by the widget.
+       */
       if (! (state & GDK_MOD1_MASK))
         {
           /* otherwise, shift/ctrl are handled by the widget */
@@ -386,7 +390,10 @@ gimp_polygon_select_tool_cursor_update (GimpTool         *tool,
           gimp_tool_widget_get_cursor (priv->widget, coords, state,
                                        NULL, NULL, &modifier);
 
-          /* let GimpSelectTool handle alt+<mod> */
+          /*  With Alt held, let GimpSelectionTool see the state as-is
+           *  (Alt is a selection modifier now); otherwise, shift/ctrl
+           *  are handled by the widget.
+           */
           if (! (state & GDK_MOD1_MASK))
             {
               /* otherwise, shift/ctrl are handled by the widget */

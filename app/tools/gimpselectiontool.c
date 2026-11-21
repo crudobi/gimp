@@ -193,37 +193,44 @@ gimp_selection_tool_modifier_key (GimpTool        *tool,
             }
         }
 
-      if ((state & GDK_MOD1_MASK) ||
-         ((state & selection_tool->held_keys) == 0))
-        {
-          /*  if alt is down, pretend that neither
-           *  shift nor control are down
-           *
-           *  The test for at least one flag being set in both state and
-           *  held keys is to prevent the problem described in issue #1589
-           *  where the modifier key is pressed to restrict the movement of a
-           *  floating layer. When the left mouse button is released this
-           *  function is called with a release event for the extend key and the
-           *  state parameter set to 4 to indicate that the modifier key is
-           *  pressed. Without this extra test the operation is set based on the
-           *  the setting of state (to GIMP_CHANNEL_OP_SUBTRACT). The next call
-           *  of this function is then for a press of the modifier key and,
-           *  because state = key = 4 selection_tool->saved_operation is set,
-           *  wrongly, to GIMP_CHANNEL_OP_SUBTRACT, overwriting the intended
-           *  setting
-           */
-          button_op = selection_tool->saved_operation;
-        }
-      else if (state & (extend_mask |
-                        modify_mask))
-        {
-          /*  else get the operation from the modifier state, but only
-           *  if there is actually a modifier pressed, so we don't
-           *  override the "last modifier released" assignment above
-           */
-          button_op = gimp_modifiers_to_channel_op (state &
-                                                    selection_tool->held_keys);
-        }
+      /*  Alt counts as the modify (subtract) modifier, like Ctrl, so
+       *  translate it before looking up the operation: Alt alone is
+       *  Subtract, Shift+Alt is Intersect.
+       */
+      {
+        GdkModifierType op_state;
+
+        op_state = state & selection_tool->held_keys;
+
+        if (op_state & GDK_MOD1_MASK)
+          op_state = (op_state & ~GDK_MOD1_MASK) | modify_mask;
+
+        if ((state & selection_tool->held_keys) == 0)
+          {
+            /*  The test for at least one flag being set in both state and
+             *  held keys is to prevent the problem described in issue #1589
+             *  where the modifier key is pressed to restrict the movement of a
+             *  floating layer. When the left mouse button is released this
+             *  function is called with a release event for the extend key and the
+             *  state parameter set to 4 to indicate that the modifier key is
+             *  pressed. Without this extra test the operation is set based on the
+             *  the setting of state (to GIMP_CHANNEL_OP_SUBTRACT). The next call
+             *  of this function is then for a press of the modifier key and,
+             *  because state = key = 4 selection_tool->saved_operation is set,
+             *  wrongly, to GIMP_CHANNEL_OP_SUBTRACT, overwriting the intended
+             *  setting
+             */
+            button_op = selection_tool->saved_operation;
+          }
+        else if (op_state & (extend_mask | modify_mask))
+          {
+            /*  else get the operation from the modifier state, but only
+             *  if there is actually a modifier pressed, so we don't
+             *  override the "last modifier released" assignment above
+             */
+            button_op = gimp_modifiers_to_channel_op (op_state);
+          }
+      }
 
       if (button_op != options->operation)
         {
@@ -248,7 +255,6 @@ gimp_selection_tool_oper_update (GimpTool         *tool,
   GdkModifierType       extend_mask;
   GdkModifierType       modify_mask;
   gboolean              have_selection;
-  gboolean              move_layer        = FALSE;
   gboolean              move_floating_sel = FALSE;
 
   image        = gimp_display_get_image (display);
@@ -268,20 +274,6 @@ gimp_selection_tool_oper_update (GimpTool         *tool,
           if (layer == floating_sel)
             move_floating_sel = TRUE;
         }
-      else if (have_selection)
-        {
-          GList *iter;
-
-          for (iter = drawables; iter; iter = iter->next)
-            {
-              if (gimp_item_mask_intersect (GIMP_ITEM (iter->data),
-                                            NULL, NULL, NULL, NULL))
-                {
-                  move_layer = TRUE;
-                  break;
-                }
-            }
-        }
 
       g_list_free (drawables);
     }
@@ -289,26 +281,8 @@ gimp_selection_tool_oper_update (GimpTool         *tool,
   selection_tool->function = SELECTION_SELECT;
 
   if (selection_tool->allow_move &&
-      (state & GDK_MOD1_MASK) && (state & modify_mask) && move_layer)
-    {
-      /* move the selection */
-      selection_tool->function = SELECTION_MOVE;
-    }
-  else if (selection_tool->allow_move &&
-           (state & GDK_MOD1_MASK) && (state & extend_mask) && move_layer)
-    {
-      /* move a copy of the selection */
-      selection_tool->function = SELECTION_MOVE_COPY;
-    }
-  else if (selection_tool->allow_move &&
-           (state & GDK_MOD1_MASK) && have_selection)
-    {
-      /* move the selection mask */
-      selection_tool->function = SELECTION_MOVE_MASK;
-    }
-  else if (selection_tool->allow_move &&
-           ! (state & (extend_mask | modify_mask)) &&
-           move_floating_sel)
+      ! (state & (extend_mask | modify_mask)) &&
+      move_floating_sel)
     {
       /* move the selection */
       selection_tool->function = SELECTION_MOVE;
@@ -323,6 +297,19 @@ gimp_selection_tool_oper_update (GimpTool         *tool,
       /* anchor the selection */
       selection_tool->function = SELECTION_ANCHOR;
     }
+  else if (selection_tool->allow_move &&
+           have_selection &&
+           ! (state & (extend_mask | modify_mask | GDK_MOD1_MASK)) &&
+           gimp_pickable_get_opacity_at (GIMP_PICKABLE (gimp_image_get_mask (image)),
+                                         (gint) coords->x,
+                                         (gint) coords->y) >= 0.5)
+    {
+      /*  drag inside the selection moves the selection mask
+       *  (Photoshop: drag inside moves, drag outside starts a new
+       *  selection). The 0.5 threshold is the marching-ants boundary.
+       */
+      selection_tool->function = SELECTION_MOVE_MASK;
+    }
 
   gimp_tool_pop_status (tool, display);
 
@@ -332,6 +319,9 @@ gimp_selection_tool_oper_update (GimpTool         *tool,
       gboolean         free_status = FALSE;
       GdkModifierType  modifiers   = (extend_mask | modify_mask);
 
+      /*  Alt is a selection modifier now (Subtract), so it is suggested
+       *  alongside Shift/Ctrl when a selection exists.
+       */
       if (have_selection)
         modifiers |= GDK_MOD1_MASK;
 

@@ -470,8 +470,10 @@ gimp_paint_tool_modifier_key (GimpTool        *tool,
 
   if (paint_tool->pick_colors && ! paint_tool->draw_line)
     {
-      if ((state & gimp_get_all_modifiers_mask ()) ==
-          gimp_get_constrain_behavior_mask ())
+      /*  Alt picks a color just like Ctrl. */
+      if (((state & gimp_get_all_modifiers_mask ()) ==
+           gimp_get_constrain_behavior_mask ()) ||
+          ((state & gimp_get_all_modifiers_mask ()) == GDK_MOD1_MASK))
         {
           if (! gimp_color_tool_is_enabled (GIMP_COLOR_TOOL (tool)))
             {
@@ -559,8 +561,9 @@ gimp_paint_tool_cursor_update (GimpTool         *tool,
               gboolean constrain_only;
 
               /* Allow pixel-locked layers to be set as sources */
-              constrain_only = (state & gimp_get_constrain_behavior_mask () &&
-                                ! (state & gimp_get_extend_selection_mask ()));
+              constrain_only = ((state & gimp_get_constrain_behavior_mask ()) ||
+                                (state & GDK_MOD1_MASK)) &&
+                               ! (state & gimp_get_extend_selection_mask ());
 
               if (! (GIMP_IS_SOURCE_TOOL (tool) && constrain_only))
                 {

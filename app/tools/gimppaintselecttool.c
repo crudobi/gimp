@@ -515,13 +515,16 @@ gimp_paint_select_tool_modifier_key (GimpTool        *tool,
             button_op = ps_tool->saved_op;
         }
 
-      if (state & GDK_MOD1_MASK)
+      if (state & (extend_mask | modify_mask | GDK_MOD1_MASK))
         {
-          button_op = ps_tool->saved_op;
-        }
-      else if (state & (extend_mask | modify_mask))
-        {
-          GimpChannelOps op = gimp_modifiers_to_channel_op (state);
+          /*  Alt counts as the modify (subtract) modifier, like Ctrl. */
+          GdkModifierType op_state = state;
+          GimpChannelOps  op;
+
+          if (op_state & GDK_MOD1_MASK)
+            op_state = (op_state & ~GDK_MOD1_MASK) | modify_mask;
+
+          op = gimp_modifiers_to_channel_op (op_state);
 
           switch (op)
             {
@@ -531,6 +534,10 @@ gimp_paint_select_tool_modifier_key (GimpTool        *tool,
 
             case GIMP_CHANNEL_OP_SUBTRACT:
               button_op = GIMP_CHANNEL_OP_SUBTRACT;
+              break;
+
+            case GIMP_CHANNEL_OP_INTERSECT:
+              button_op = GIMP_CHANNEL_OP_INTERSECT;
               break;
 
             default:
