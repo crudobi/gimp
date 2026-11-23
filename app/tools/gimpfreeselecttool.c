@@ -225,7 +225,20 @@ gimp_free_select_tool_button_press (GimpTool            *tool,
   GimpPolygonSelectTool     *poly_sel = GIMP_POLYGON_SELECT_TOOL (tool);
   GimpFreeSelectToolPrivate *priv     = free_sel->priv;
 
+  /*  While a polygon stroke is in progress, the click belongs to the
+   *  stroke: it must add a point (or extend the freehand segment),
+   *  never divert to moving the existing selection.  Diverting would
+   *  push the edit tool, deactivate this tool, and commit (close) the
+   *  in-progress stroke -- the bug reported for Shift/Ctrl/Alt adds
+   *  and subtracts, and for a plain in-progress stroke too.
+   *  Only when no stroke is in progress (or the polygon is already
+   *  closed) may the click move or interact with the existing
+   *  selection, so a plain click-drag inside a selection with no
+   *  stroke in progress still moves the mask.
+   */
   if (press_type == GIMP_BUTTON_PRESS_NORMAL &&
+      ! (priv->started &&
+         ! gimp_polygon_select_tool_is_closed (poly_sel)) &&
       gimp_selection_tool_start_edit (GIMP_SELECTION_TOOL (poly_sel),
                                       display, coords))
     return;
