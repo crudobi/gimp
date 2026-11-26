@@ -119,8 +119,16 @@ tools_select_cmd_callback (GimpAction *action,
    *  from the currently active member, so repeated taps walk the whole
    *  group. Pressing the shortcut of a tool in a different group still
    *  selects that tool, as before.
+   *
+   *  Exception: Unified Transform (Ctrl+T, Free Transform) never
+   *  cycles. It is a command, not a group tap: every Ctrl+T must
+   *  (re-)select Unified Transform. Cycling it would advance the
+   *  transform group to Rotate on the second press, so the next drag
+   *  would move the pivot instead of transforming. Re-selecting the
+   *  already-active tool below re-allocates it, so the transform grid
+   *  comes back up with an identity matrix.
    */
-  if (tool_info)
+  if (tool_info && strcmp (tool_name, "gimp-unified-transform-tool") != 0)
     {
       GimpToolInfo *active_tool = gimp_context_get_tool (context);
       GimpViewable *active_parent = active_tool ?
