@@ -198,7 +198,8 @@ static gboolean gimp_tool_transform_grid_get_cursor     (GimpToolWidget        *
 static GimpTransformHandle
                 gimp_tool_transform_grid_get_handle_for_coords
                                                         (GimpToolTransformGrid *grid,
-                                                         const GimpCoords      *coords);
+                                                         const GimpCoords      *coords,
+                                                         GdkModifierType        state);
 static void     gimp_tool_transform_grid_update_hilight (GimpToolTransformGrid *grid);
 static void     gimp_tool_transform_grid_update_box     (GimpToolTransformGrid *grid);
 static void     gimp_tool_transform_grid_update_matrix  (GimpToolTransformGrid *grid);
@@ -1985,7 +1986,7 @@ gimp_tool_transform_grid_hit (GimpToolWidget   *widget,
   GimpToolTransformGrid *grid = GIMP_TOOL_TRANSFORM_GRID (widget);
   GimpTransformHandle    handle;
 
-  handle = gimp_tool_transform_grid_get_handle_for_coords (grid, coords);
+  handle = gimp_tool_transform_grid_get_handle_for_coords (grid, coords, state);
 
   if (handle != GIMP_TRANSFORM_HANDLE_NONE)
     return GIMP_HIT_DIRECT;
@@ -2003,7 +2004,14 @@ gimp_tool_transform_grid_hover (GimpToolWidget   *widget,
   GimpToolTransformGridPrivate *private = grid->private;
   GimpTransformHandle           handle;
 
-  handle = gimp_tool_transform_grid_get_handle_for_coords (grid, coords);
+  /*  Remember the last hovered position: hover_modifier re-evaluates
+   *  the hover here when Alt is pressed or released, and the widget's
+   *  motion function only records curx/cury during a drag.
+   */
+  private->curx = coords->x;
+  private->cury = coords->y;
+
+  handle = gimp_tool_transform_grid_get_handle_for_coords (grid, coords, state);
 
   if (handle == GIMP_TRANSFORM_HANDLE_NONE)
     {
@@ -2099,6 +2107,20 @@ gimp_tool_transform_grid_hover_modifier (GimpToolWidget  *widget,
       coords.x = private->curx;
       coords.y = private->cury;
       gimp_tool_transform_grid_motion (widget, &coords, 0, state);
+    }
+  else if (key == GDK_MOD1_MASK)
+    {
+      /*  Alt switches the corner hit test between scale and
+       *  perspective; re-evaluate the hovered handle so the status
+       *  text and highlight follow the modifier without waiting for
+       *  the next mouse motion.  (curx, cury) hold the last hovered
+       *  position (hover() records it).  The press itself is covered
+       *  regardless: the tool re-hovers with the current state before
+       *  button_press.
+       */
+      coords.x = private->curx;
+      coords.y = private->cury;
+      gimp_tool_transform_grid_hover (widget, &coords, state, TRUE);
     }
 }
 
@@ -2306,12 +2328,51 @@ gimp_tool_transform_grid_get_cursor (GimpToolWidget     *widget,
 
 static GimpTransformHandle
 gimp_tool_transform_grid_get_handle_for_coords (GimpToolTransformGrid *grid,
-                                                const GimpCoords      *coords)
+                                                const GimpCoords      *coords,
+                                                GdkModifierType        state)
 {
   GimpToolTransformGridPrivate *private = grid->private;
   GimpTransformHandle           i;
 
-  for (i = GIMP_TRANSFORM_HANDLE_NONE + 1; i < GIMP_N_TRANSFORM_HANDLES; i++)
+  /*  The corner scale handles and the perspective handles sit on the
+   *  same corner point, the perspective diamond (0.8x) concentrically
+   *  inside the scale square (1.5x), and a handle hit is a bounding
+   *  box test -- so any point that hits the diamond also hits the
+   *  square.  Testing in enum order let the perspective handle win
+   *  every corner grab, so a plain corner drag in Unified Transform
+   *  applied perspective instead of scale.
+   *
+   *  The two handles share the corner, so the first pass decides it:
+   *  with Alt held (Alt is otherwise unused by this widget: Shift
+   *  inverts constrain, Ctrl toggles from-pivot) the perspective
+   *  handle wins the corner; otherwise the scale handle wins.  The
+   *  perspective handle is also reachable with no modifier when no
+   *  scale handles exist at all, as in the dedicated Perspective
+   *  tool.  With Alt held, a grab on the square outside the diamond
+   *  still falls through to the scale handle.
+   */
+  if ((state & GDK_MOD1_MASK) || ! private->use_corner_handles)
+    {
+      for (i = GIMP_TRANSFORM_HANDLE_NW_P; i <= GIMP_TRANSFORM_HANDLE_SE_P; i++)
+        {
+          if (private->handles[i] &&
+              gimp_canvas_item_hit (private->handles[i], coords->x, coords->y))
+            {
+              return i;
+            }
+        }
+    }
+
+  for (i = GIMP_TRANSFORM_HANDLE_NW; i <= GIMP_TRANSFORM_HANDLE_SE; i++)
+    {
+      if (private->handles[i] &&
+          gimp_canvas_item_hit (private->handles[i], coords->x, coords->y))
+        {
+          return i;
+        }
+    }
+
+  for (i = GIMP_TRANSFORM_HANDLE_N; i < GIMP_N_TRANSFORM_HANDLES; i++)
     {
       if (private->handles[i] &&
           gimp_canvas_item_hit (private->handles[i], coords->x, coords->y))
