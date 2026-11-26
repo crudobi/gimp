@@ -29,6 +29,7 @@
 #include "core/gimp.h"
 #include "core/gimpcontainer.h"
 #include "core/gimpcontext.h"
+#include "core/gimpimage.h"
 #include "core/gimptoolinfo.h"
 
 #include "widgets/gimpaction.h"
@@ -48,7 +49,21 @@ static const GimpActionEntry tools_actions[] =
     NC_("tools-action", "Activate _Last Tool"), NULL, { "<shift>X", NULL },
     NC_("tools-action", "Switch back to the last activated tool"),
     tools_swap_cmd_callback,
-    GIMP_HELP_TOOLBOX_SWAP_TOOLS }
+    GIMP_HELP_TOOLBOX_SWAP_TOOLS },
+
+  /*  No accelerator here: the Ctrl+Shift+T / Ctrl+Alt+T bindings are
+   *  added centrally with the shortcutsrc update.
+   */
+  { "tools-transform-again", GIMP_ICON_TOOL_UNIFIED_TRANSFORM,
+    NC_("tools-action", "Transform _Again"), NULL, { NULL },
+    NC_("tools-action", "Repeat the last transformation"),
+    tools_transform_again_cmd_callback,
+    GIMP_HELP_TOOL_UNIFIED_TRANSFORM },
+  { "tools-transform-duplicate", GIMP_ICON_TOOL_UNIFIED_TRANSFORM,
+    NC_("tools-action", "_Duplicate and Transform"), NULL, { NULL },
+    NC_("tools-action", "Duplicate the selected layers and transform the copy"),
+    tools_transform_duplicate_cmd_callback,
+    GIMP_HELP_TOOL_UNIFIED_TRANSFORM }
 };
 
 static const GimpStringActionEntry tools_alternative_actions[] =
@@ -863,6 +878,14 @@ tools_actions_update (GimpActionGroup *group,
    */
   SET_SENSITIVE ("tools-rotate-arbitrary", image);
   SET_SENSITIVE ("tools-rotate-image-arbitrary", image);
+  /*  Transform Again stays sensitive with an image even before any
+   *  transform: its callback warns when there is nothing to repeat,
+   *  which avoids depending on an action-group update firing right
+   *  after the first transform is recorded.
+   */
+  SET_SENSITIVE ("tools-transform-again", image);
+  SET_SENSITIVE ("tools-transform-duplicate",
+                 image && gimp_image_get_selected_layers (image));
 
 #undef SET_SENSITIVE
 }

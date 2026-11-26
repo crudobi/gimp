@@ -29,6 +29,7 @@
 #include "core/gimp.h"
 #include "core/gimpcontainer.h"
 #include "core/gimpcontext.h"
+#include "core/gimpimage.h"
 #include "core/gimptoolinfo.h"
 #include "core/gimptoolgroup.h"
 
@@ -55,7 +56,10 @@
 #include "tools/tool_manager.h"
 
 #include "actions.h"
+#include "layers-commands.h"
 #include "tools-commands.h"
+
+#include "gimp-intl.h"
 
 
 /*  local function prototypes  */
@@ -76,6 +80,55 @@ tools_swap_cmd_callback (GimpAction *action,
   return_if_no_gimp (gimp, data);
 
   tool_manager_swap_tools (gimp, FALSE);
+}
+
+void
+tools_transform_again_cmd_callback (GimpAction *action,
+                                    GVariant   *value,
+                                    gpointer    data)
+{
+  Gimp        *gimp;
+  GimpDisplay *display;
+
+  return_if_no_gimp (gimp, data);
+  return_if_no_display (display, data);
+
+  /*  The action stays sensitive with an image even before any
+   *  transform has been recorded (see tools_actions_update), so
+   *  this warns when there is nothing to repeat yet.
+   */
+  if (! gimp_transform_tool_transform_again (gimp, display) &&
+      ! gimp_transform_tool_has_last_transform ())
+    {
+      gimp_message_literal (gimp, NULL, GIMP_MESSAGE_WARNING,
+                            _("There is no transform to repeat yet."));
+    }
+}
+
+void
+tools_transform_duplicate_cmd_callback (GimpAction *action,
+                                        GVariant   *value,
+                                        gpointer    data)
+{
+  Gimp         *gimp;
+  GimpImage    *image;
+  GList        *layers;
+  GimpToolInfo *tool_info;
+
+  return_if_no_gimp (gimp, data);
+  return_if_no_layers (image, layers, data);
+
+  /*  Duplicate the selected layers (the copies become the selection),
+   *  then enter Free Transform on the copy, as in Photoshop's
+   *  Ctrl+Alt+T.  Selecting the Unified Transform tool
+   *  auto-initializes its grid on the duplicated layers.
+   */
+  layers_duplicate_cmd_callback (action, value, data);
+
+  tool_info = gimp_get_tool_info (gimp, "gimp-unified-transform-tool");
+
+  if (tool_info)
+    gimp_context_set_tool (gimp_get_user_context (gimp), tool_info);
 }
 
 void

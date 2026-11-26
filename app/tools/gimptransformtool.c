@@ -37,6 +37,7 @@
 #include "core/gimplayer.h"
 #include "core/gimplayermask.h"
 #include "core/gimpprogress.h"
+#include "core/gimptoolinfo.h"
 #include "core/gimp-transform-resize.h"
 
 #include "path/gimppath.h"
@@ -80,6 +81,12 @@ static GeglBuffer             * gimp_transform_tool_real_transform     (GimpTran
                                                                         gint               *new_offset_y);
 
 static void                     gimp_transform_tool_halt               (GimpTransformTool  *tr_tool);
+
+static gboolean                 gimp_transform_tool_transform_internal (GimpTransformTool  *tr_tool,
+                                                                        GimpDisplay        *display,
+                                                                        GList              *objects);
+static void                     gimp_transform_tool_record_last_transform
+                                                                       (GimpTransformTool  *tr_tool);
 
 static gboolean                 gimp_transform_tool_confirm            (GimpTransformTool  *tr_tool,
                                                                         GimpDisplay        *display);
@@ -813,14 +820,159 @@ gimp_transform_tool_check_selected_objects (GimpTransformTool  *tr_tool,
   return objects;
 }
 
+/*  The last transform applied through gimp_transform_tool_transform (),
+ *  for Transform Again (tools-transform-again).  The matrix is the
+ *  absolute image-space matrix, so re-applying it compounds the
+ *  transform exactly like Photoshop's Transform Again: a second scale
+ *  by 1.2 is a scale by 1.44, a second move by +50 px is +100 px.
+ *
+ *  The record is process-global, not per tool instance: tool instances
+ *  are recreated on every tool switch, so per-instance state would not
+ *  survive leaving the transform tool.  It applies to the current
+ *  image's selected objects, whatever they are now.
+ */
+typedef struct
+{
+  gboolean               valid;
+  gchar                 *tool_name;      /* tool_info name, e.g. "gimp-unified-transform-tool" */
+  GimpMatrix3            transform;
+  GimpTransformType      type;
+  GimpTransformDirection direction;
+  GimpInterpolationType  interpolation;
+  GimpTransformResize    clip;
+} GimpLastTransform;
+
+static GimpLastTransform last_transform = { FALSE, NULL, };
+
+static void
+gimp_transform_tool_record_last_transform (GimpTransformTool *tr_tool)
+{
+  GimpTool             *tool    = GIMP_TOOL (tr_tool);
+  GimpTransformOptions *options = GIMP_TRANSFORM_TOOL_GET_OPTIONS (tool);
+
+  g_clear_pointer (&last_transform.tool_name, g_free);
+
+  last_transform.valid         = TRUE;
+  last_transform.tool_name     = g_strdup (gimp_object_get_name (tool->tool_info));
+  last_transform.transform     = tr_tool->transform;
+  last_transform.type          = options->type;
+  last_transform.direction     = GIMP_TRANSFORM_TOOL_GET_CLASS (tr_tool)->get_direction (tr_tool);
+  last_transform.interpolation = options->interpolation;
+  last_transform.clip          = options->clip;
+}
+
 gboolean
-gimp_transform_tool_transform (GimpTransformTool *tr_tool,
-                               GimpDisplay       *display)
+gimp_transform_tool_has_last_transform (void)
+{
+  return last_transform.valid;
+}
+
+gboolean
+gimp_transform_tool_transform_again (Gimp        *gimp,
+                                     GimpDisplay *display)
+{
+  GimpToolInfo           *tool_info;
+  GimpTool               *tool;
+  GimpTransformTool      *tr_tool;
+  GimpTransformOptions   *options;
+  GList                  *selected_objects;
+  GError                 *error               = NULL;
+  gboolean                success             = FALSE;
+  GimpTransformType       saved_type;
+  GimpTransformDirection  saved_direction;
+  GimpInterpolationType   saved_interpolation;
+  GimpTransformResize     saved_clip;
+
+  g_return_val_if_fail (GIMP_IS_GIMP (gimp), FALSE);
+  g_return_val_if_fail (GIMP_IS_DISPLAY (display), FALSE);
+
+  if (! last_transform.valid)
+    return FALSE;
+
+  tool_info = gimp_get_tool_info (gimp, last_transform.tool_name);
+
+  if (! tool_info)
+    return FALSE;
+
+  /*  A transient instance of the tool that performed the transform.
+   *  The original instance is gone (tool instances are recreated on
+   *  every switch), and activating the tool here would pop its grid
+   *  up on the image -- Transform Again applies immediately, with no
+   *  grid.  The instance is never activated; it only lends its class
+   *  vfuncs (undo description, transform) and its persistent tool
+   *  options.  Constructing a tool instance is side-effect free:
+   *  display/context wiring happens in the tool manager, not in
+   *  _init.  A NULL display makes gimp_tool_progress_start () fail
+   *  closed (no progress widget), which the transform path tolerates.
+   */
+  tool = g_object_new (tool_info->tool_type,
+                       "tool-info", tool_info,
+                       NULL);
+
+  if (! GIMP_IS_TRANSFORM_TOOL (tool))
+    {
+      g_object_unref (tool);
+      return FALSE;
+    }
+
+  tr_tool = GIMP_TRANSFORM_TOOL (tool);
+  options = GIMP_TRANSFORM_TOOL_GET_OPTIONS (tr_tool);
+
+  /*  The recorded option values win over the tool's current ones;
+   *  restore them afterwards so Transform Again leaves the tool
+   *  options exactly as they were.
+   */
+  saved_type          = options->type;
+  saved_direction     = options->direction;
+  saved_interpolation = options->interpolation;
+  saved_clip          = options->clip;
+
+  g_object_set (options,
+                "type",          last_transform.type,
+                "direction",     last_transform.direction,
+                "interpolation", last_transform.interpolation,
+                "clip",          last_transform.clip,
+                NULL);
+
+  tr_tool->transform       = last_transform.transform;
+  tr_tool->transform_valid = TRUE;
+
+  selected_objects = gimp_transform_tool_check_selected_objects (tr_tool,
+                                                                 display,
+                                                                 &error);
+
+  if (! selected_objects)
+    {
+      gimp_tool_message_literal (tool, display, error->message);
+      g_clear_error (&error);
+      goto restore;
+    }
+
+  success = gimp_transform_tool_transform_internal (tr_tool, display,
+                                                    selected_objects);
+
+ restore:
+  g_object_set (options,
+                "type",          saved_type,
+                "direction",     saved_direction,
+                "interpolation", saved_interpolation,
+                "clip",          saved_clip,
+                NULL);
+
+  g_object_unref (tool);
+
+  return success;
+}
+
+
+static gboolean
+gimp_transform_tool_transform_internal (GimpTransformTool *tr_tool,
+                                        GimpDisplay       *display,
+                                        GList             *selected_objects)
 {
   GimpTool             *tool;
   GimpTransformOptions *options;
   GimpImage            *image;
-  GList                *selected_objects;
   GeglBuffer           *orig_buffer   = NULL;
   gint                  orig_offset_x = 0;
   gint                  orig_offset_y = 0;
@@ -830,10 +982,10 @@ gimp_transform_tool_transform (GimpTransformTool *tr_tool,
   GimpColorProfile     *buffer_profile;
   gchar                *undo_desc     = NULL;
   gboolean              new_layer     = FALSE;
-  GError               *error         = NULL;
 
   g_return_val_if_fail (GIMP_IS_TRANSFORM_TOOL (tr_tool), FALSE);
   g_return_val_if_fail (GIMP_IS_DISPLAY (display), FALSE);
+  g_return_val_if_fail (selected_objects != NULL, FALSE);
 
   tool    = GIMP_TOOL (tr_tool);
   options = GIMP_TRANSFORM_TOOL_GET_OPTIONS (tool);
@@ -841,22 +993,18 @@ gimp_transform_tool_transform (GimpTransformTool *tr_tool,
 
   g_return_val_if_fail (GIMP_IS_IMAGE (image), FALSE);
 
-  selected_objects = gimp_transform_tool_check_selected_objects (tr_tool, display,
-                                                                 &error);
-
-  if (! selected_objects)
-    {
-      gimp_tool_message_literal (tool, display, error->message);
-      g_clear_error (&error);
-      return FALSE;
-    }
-
-  gimp_transform_tool_recalc_matrix (tr_tool, display);
+  /*  tr_tool->transform is already set by the caller: recalculated
+   *  from the grid by gimp_transform_tool_transform (), or restored
+   *  from the last-transform record by
+   *  gimp_transform_tool_transform_again ().  selected_objects is
+   *  owned by this function.
+   */
 
   if (! tr_tool->transform_valid)
     {
       gimp_tool_message_literal (tool, display,
                                  _("The current transform is invalid"));
+      g_list_free (selected_objects);
       return FALSE;
     }
 
@@ -864,11 +1012,15 @@ gimp_transform_tool_transform (GimpTransformTool *tr_tool,
       gimp_matrix3_is_identity (&tr_tool->transform))
     {
       /* No need to commit an identity transformation! */
+      g_list_free (selected_objects);
       return TRUE;
     }
 
   if (! gimp_transform_tool_confirm (tr_tool, display))
-    return FALSE;
+    {
+      g_list_free (selected_objects);
+      return FALSE;
+    }
 
   gimp_set_busy (display->gimp);
 
@@ -951,6 +1103,41 @@ gimp_transform_tool_transform (GimpTransformTool *tr_tool,
   g_list_free (selected_objects);
 
   return TRUE;
+}
+
+gboolean
+gimp_transform_tool_transform (GimpTransformTool *tr_tool,
+                               GimpDisplay       *display)
+{
+  GimpTool   *tool;
+  GList      *selected_objects;
+  GError     *error   = NULL;
+  gboolean    success;
+
+  g_return_val_if_fail (GIMP_IS_TRANSFORM_TOOL (tr_tool), FALSE);
+  g_return_val_if_fail (GIMP_IS_DISPLAY (display), FALSE);
+
+  tool = GIMP_TOOL (tr_tool);
+
+  selected_objects = gimp_transform_tool_check_selected_objects (tr_tool, display,
+                                                                 &error);
+
+  if (! selected_objects)
+    {
+      gimp_tool_message_literal (tool, display, error->message);
+      g_clear_error (&error);
+      return FALSE;
+    }
+
+  gimp_transform_tool_recalc_matrix (tr_tool, display);
+
+  success = gimp_transform_tool_transform_internal (tr_tool, display,
+                                                    selected_objects);
+
+  if (success && ! gimp_matrix3_is_identity (&tr_tool->transform))
+    gimp_transform_tool_record_last_transform (tr_tool);
+
+  return success;
 }
 
 void

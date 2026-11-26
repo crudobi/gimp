@@ -97,5 +97,13 @@ void         gimp_transform_tool_recalc_matrix       (GimpTransformTool  *tr_too
 gboolean     gimp_transform_tool_transform           (GimpTransformTool  *tr_tool,
                                                       GimpDisplay        *display);
 
+/*  Transform Again: the last transform applied through
+ *  gimp_transform_tool_transform (), re-applied to the current
+ *  image's selected objects.
+ */
+gboolean     gimp_transform_tool_has_last_transform  (void);
+gboolean     gimp_transform_tool_transform_again     (Gimp                *gimp,
+                                                      GimpDisplay         *display);
+
 void         gimp_transform_tool_set_type            (GimpTransformTool  *tr_tool,
                                                       GimpTransformType   type);

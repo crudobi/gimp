@@ -22,6 +22,13 @@ void   tools_swap_cmd_callback                      (GimpAction *action,
                                                      GVariant   *value,
                                                      gpointer    data);
 
+void   tools_transform_again_cmd_callback           (GimpAction *action,
+                                                     GVariant   *value,
+                                                     gpointer    data);
+void   tools_transform_duplicate_cmd_callback       (GimpAction *action,
+                                                     GVariant   *value,
+                                                     gpointer    data);
+
 void   tools_select_cmd_callback                    (GimpAction *action,
                                                      GVariant   *value,
                                                      gpointer    data);
