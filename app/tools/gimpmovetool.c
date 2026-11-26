@@ -33,13 +33,17 @@
 #include "core/gimp.h"
 #include "core/gimp-cairo.h"
 #include "core/gimp-utils.h"
+#include "core/gimpchannel.h"
+#include "core/gimpdrawable.h"
 #include "core/gimpguide.h"
 #include "core/gimpimage.h"
 #include "core/gimpimage-pick-item.h"
+#include "core/gimpitem.h"
 #include "core/gimplayer.h"
 #include "core/gimpimage-undo.h"
 #include "core/gimplayermask.h"
 #include "core/gimplayer-floating-selection.h"
+#include "core/gimpselection.h"
 #include "core/gimpundostack.h"
 
 #include "widgets/gimphelp-ids.h"
@@ -197,6 +201,18 @@ gimp_move_tool_button_press (GimpTool            *tool,
   move->floating_layer = NULL;
 
   g_clear_pointer (&move->guides, g_list_free);
+
+  /* Recover from an interrupted Alt+drag duplicate (see below):
+   * never let a stale duplicate undo group swallow later undos.
+   */
+  if (g_object_get_data (G_OBJECT (image),
+                         "gimp-move-tool-duplicate-undo") &&
+      gimp_image_get_undo_group_count (image) > 0)
+    {
+      g_object_set_data (G_OBJECT (image),
+                         "gimp-move-tool-duplicate-undo", NULL);
+      gimp_image_undo_group_end (image);
+    }
 
   if (! options->move_current)
     {
@@ -375,11 +391,110 @@ gimp_move_tool_button_press (GimpTool            *tool,
 
   if (! active_item && ! selected_items)
     {
-      gimp_tool_message_literal (tool, display, null_message);
-      gimp_tools_show_tool_options (display->gimp);
-      gimp_widget_blink (options->type_box);
-      gimp_tool_control (tool, GIMP_TOOL_ACTION_HALT, display);
-      return;
+      /* Alt+drag with the Move tool and no selection: duplicate the
+       * layer, then move the copy (Photoshop).  When a selection
+       * exists, Alt+drag keeps its GIMP meaning: moving the
+       * selection mask (handled by the SELECTION case above).
+       * The duplicate and the move share one undo group, opened
+       * here and closed in button_release.
+       */
+      if (options->move_type == GIMP_TRANSFORM_TYPE_SELECTION &&
+          (state & GDK_MOD1_MASK) &&
+          ! gimp_image_get_floating_selection (image))
+        {
+          GList *selected = gimp_image_get_selected_drawables (image);
+
+          if (selected && GIMP_IS_LAYER (selected->data))
+            {
+              GList *to_duplicate = NULL;
+              GList *iter;
+
+              if (options->move_current)
+                {
+                  /* Move-the-active-layer mode: duplicate the
+                   * selected layers.
+                   */
+                  to_duplicate =
+                    g_list_copy (gimp_image_get_selected_layers (image));
+                }
+              else
+                {
+                  GimpLayer *layer;
+
+                  layer = gimp_image_pick_layer (image,
+                                                 coords->x, coords->y,
+                                                 NULL);
+
+                  if (layer)
+                    to_duplicate = g_list_prepend (NULL, layer);
+                }
+
+              for (iter = to_duplicate; iter; iter = iter->next)
+                {
+                  if (! GIMP_IS_LAYER (iter->data) ||
+                      gimp_item_is_position_locked (iter->data, NULL))
+                    {
+                      g_list_free (to_duplicate);
+                      to_duplicate = NULL;
+                      break;
+                    }
+                }
+
+              if (to_duplicate)
+                {
+                  GList *new_layers = NULL;
+
+                  g_clear_pointer (&move->old_selected_layers, g_list_free);
+                  move->old_selected_layers =
+                    g_list_copy (gimp_image_get_selected_layers (image));
+
+                  gimp_image_undo_group_start (image,
+                                               GIMP_UNDO_GROUP_ITEM_DISPLACE,
+                                               _("Duplicate Layer"));
+
+                  g_object_set_data (G_OBJECT (image),
+                                     "gimp-move-tool-duplicate-undo",
+                                     GUINT_TO_POINTER (TRUE));
+
+                  for (iter = to_duplicate; iter; iter = iter->next)
+                    {
+                      GimpLayer *new_layer;
+
+                      new_layer =
+                        GIMP_LAYER (gimp_item_duplicate (GIMP_ITEM (iter->data),
+                                                         G_TYPE_FROM_INSTANCE (iter->data)));
+
+                      gimp_image_add_layer (image, new_layer,
+                                            gimp_layer_get_parent (GIMP_LAYER (iter->data)),
+                                            gimp_item_get_index (GIMP_ITEM (iter->data)),
+                                            TRUE);
+                      gimp_drawable_enable_resize_undo (GIMP_DRAWABLE (new_layer));
+
+                      new_layers = g_list_prepend (new_layers, new_layer);
+                    }
+
+                  gimp_image_set_selected_layers (image, new_layers);
+
+                  selected_items = gimp_image_get_selected_drawables (image);
+
+                  g_list_free (to_duplicate);
+                  g_list_free (new_layers);
+
+                  translate_mode = GIMP_TRANSLATE_MODE_LAYER;
+                }
+            }
+
+          g_list_free (selected);
+        }
+
+      if (! active_item && ! selected_items)
+        {
+          gimp_tool_message_literal (tool, display, null_message);
+          gimp_tools_show_tool_options (display->gimp);
+          gimp_widget_blink (options->type_box);
+          gimp_tool_control (tool, GIMP_TOOL_ACTION_HALT, display);
+          return;
+        }
     }
   else if (locked_message)
     {
@@ -416,6 +531,29 @@ gimp_move_tool_button_release (GimpTool              *tool,
   gboolean       flush  = FALSE;
 
   gimp_tool_control_halt (tool->control);
+
+  /* Alt+drag duplicate (see button_press): the duplicate and the
+   * move share one undo group, opened at press time.  End it here,
+   * after the edit-selection tool closed its (nested) group.  On
+   * cancel the inner tool already closed this group and undid the
+   * whole gesture (see gimp_edit_selection_tool_button_release),
+   * so by the time we get here the group count is 0 and there is
+   * nothing left to undo.
+   */
+  if (g_object_get_data (G_OBJECT (image),
+                         "gimp-move-tool-duplicate-undo"))
+    {
+      g_object_set_data (G_OBJECT (image),
+                         "gimp-move-tool-duplicate-undo", NULL);
+
+      if (gimp_image_get_undo_group_count (image) > 0)
+        {
+          gimp_image_undo_group_end (image);
+
+          if (release_type == GIMP_BUTTON_RELEASE_CANCEL)
+            gimp_image_undo (image);
+        }
+    }
 
   if (! config->move_tool_changes_active ||
       (release_type == GIMP_BUTTON_RELEASE_CANCEL))
@@ -457,6 +595,113 @@ gimp_move_tool_key_press (GimpTool    *tool,
                           GimpDisplay *display)
 {
   GimpMoveOptions *options = GIMP_MOVE_TOOL_GET_OPTIONS (tool);
+
+  if (kevent->keyval == GDK_KEY_Left   ||
+      kevent->keyval == GDK_KEY_Right  ||
+      kevent->keyval == GDK_KEY_Up     ||
+      kevent->keyval == GDK_KEY_Down)
+    {
+      if (kevent->state & gimp_get_toggle_behavior_mask ())
+        {
+          /* Ctrl+arrow always nudges the layer (Photoshop), even
+           * though holding Ctrl switches the Move tool to path
+           * mode for drags.  Path nudging stays available with
+           * the Path tool active.
+           */
+          return gimp_edit_selection_tool_translate (tool, kevent,
+                                                     GIMP_TRANSFORM_TYPE_LAYER,
+                                                     display,
+                                                     &options->type_box);
+        }
+      else if (! (kevent->state & GDK_MOD1_MASK) &&
+               options->move_type == GIMP_TRANSFORM_TYPE_LAYER &&
+               ! gimp_image_get_floating_selection (gimp_display_get_image (display)))
+        {
+          /* Plain arrow with the Move tool and a selection: nudge
+           * the selection contents, not the layer (Photoshop).
+           * The contents are floated, then the floating selection
+           * is moved; both land in one undo group, and repeated
+           * presses compress into it like any other nudge.
+           */
+          GimpImage *image       = gimp_display_get_image (display);
+          GList     *selected    = NULL;
+          GList     *iter;
+          gboolean   plain_layer = FALSE;
+          gboolean   float_it    = FALSE;
+
+          if (! gimp_channel_is_empty (GIMP_CHANNEL (gimp_image_get_mask (image))))
+            {
+              selected = gimp_image_get_selected_drawables (image);
+
+              if (selected &&
+                  ! GIMP_IS_LAYER_MASK (selected->data) &&
+                  ! GIMP_IS_CHANNEL (selected->data) &&
+                  ! gimp_layer_is_floating_sel (selected->data))
+                {
+                  plain_layer = TRUE;
+
+                  for (iter = selected; iter; iter = iter->next)
+                    {
+                      gint x, y, width, height;
+
+                      if (gimp_item_mask_intersect (iter->data,
+                                                    &x, &y, &width, &height))
+                        {
+                          float_it = TRUE;
+                          break;
+                        }
+                    }
+                }
+            }
+
+          if (float_it)
+            {
+              GError   *error  = NULL;
+              gboolean  moved;
+
+              gimp_image_undo_group_start (image,
+                                           GIMP_UNDO_GROUP_ITEM_DISPLACE,
+                                           _("Move Selection"));
+
+              if (gimp_selection_float (GIMP_SELECTION (gimp_image_get_mask (image)),
+                                        selected,
+                                        gimp_get_user_context (display->gimp),
+                                        TRUE, 0, 0, &error))
+                {
+                  moved = gimp_edit_selection_tool_translate (tool, kevent,
+                                                              GIMP_TRANSFORM_TYPE_LAYER,
+                                                              display,
+                                                              &options->type_box);
+                }
+              else
+                {
+                  gimp_tool_message_literal (tool, display, error->message);
+                  g_clear_error (&error);
+                  moved = TRUE;
+                }
+
+              gimp_image_undo_group_end (image);
+              gimp_image_flush (image);
+
+              g_list_free (selected);
+
+              return moved;
+            }
+          else if (plain_layer)
+            {
+              /* A selection exists but holds no pixels of the
+               * active layer: there are no contents to move.
+               */
+              gimp_tool_message_literal (tool, display,
+                                         _("The selection does not overlap the layer."));
+              g_list_free (selected);
+
+              return TRUE;
+            }
+
+          g_list_free (selected);
+        }
+    }
 
   return gimp_edit_selection_tool_translate (tool, kevent,
                                              options->move_type,

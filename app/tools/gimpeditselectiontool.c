@@ -64,7 +64,7 @@
 #include "gimp-intl.h"
 
 
-#define ARROW_VELOCITY 25
+#define ARROW_VELOCITY 10
 
 
 typedef struct _GimpEditSelectionTool      GimpEditSelectionTool;
@@ -451,6 +451,17 @@ gimp_edit_selection_tool_button_release (GimpTool              *tool,
 
   if (release_type == GIMP_BUTTON_RELEASE_CANCEL)
     {
+      /* An Alt+drag duplicate (Move tool, gimpmovetool.c) opens an
+       * outer undo group around this drag; close it first, so the
+       * cancel-undo below can pop the whole gesture, duplicate
+       * included.  gimp_image_undo () is a no-op (with a critical
+       * warning) while any group is still open.
+       */
+      if (g_object_get_data (G_OBJECT (image),
+                             "gimp-move-tool-duplicate-undo") &&
+          gimp_image_get_undo_group_count (image) > 0)
+        gimp_image_undo_group_end (image);
+
       /* Operation cancelled - undo the undo-group! */
       gimp_image_undo (image);
     }
@@ -1058,6 +1069,7 @@ gimp_edit_selection_tool_start_undo_group (GimpEditSelectionTool *edit_select,
 
 static gint
 process_event_queue_keys (GdkEventKey *kevent,
+                          GdkModifierType extend_mask,
                           ... /* GdkKeyType, GdkModifierType, value ... 0 */)
 {
 
@@ -1076,7 +1088,7 @@ process_event_queue_keys (GdkEventKey *kevent,
   gboolean         done   = FALSE;
   GtkWidget       *orig_widget;
 
-  va_start (argp, kevent);
+  va_start (argp, extend_mask);
 
   while (n_keys < FILTER_MAX_KEYS &&
          (keys[n_keys] = va_arg (argp, guint)) != 0)
@@ -1088,9 +1100,15 @@ process_event_queue_keys (GdkEventKey *kevent,
 
   va_end (argp);
 
+  /*  A pattern matches only if all of its modifiers are held AND its
+   *  extend-selection (Shift) bit agrees with the event: the plain
+   *  (1 px) pattern must not also match a Shift event, which used to
+   *  double-count Shift+arrow as velocity + 1.
+   */
   for (i = 0; i < n_keys; i++)
     if (kevent->keyval                 == keys[i] &&
-        (kevent->state & modifiers[i]) == modifiers[i])
+        (kevent->state & modifiers[i]) == modifiers[i] &&
+        (kevent->state & extend_mask)  == (modifiers[i] & extend_mask))
       value += values[i];
 
   orig_widget = gtk_get_event_widget ((GdkEvent *) kevent);
@@ -1111,7 +1129,8 @@ process_event_queue_keys (GdkEventKey *kevent,
             {
               for (i = 0; i < n_keys; i++)
                 if (event->key.keyval                 == keys[i] &&
-                    (event->key.state & modifiers[i]) == modifiers[i])
+                    (event->key.state & modifiers[i]) == modifiers[i] &&
+                    (event->key.state & extend_mask)  == (modifiers[i] & extend_mask))
                   {
                     discard_event = TRUE;
                     value += values[i];
@@ -1156,15 +1175,41 @@ gimp_edit_selection_tool_key_press (GimpTool    *tool,
                                     GdkEventKey *kevent,
                                     GimpDisplay *display)
 {
-  GimpTransformType translate_type;
+  GimpImage         *image = gimp_display_get_image (display);
+  GimpTransformType  translate_type;
 
   if (kevent->state & GDK_MOD1_MASK)
     {
+      /* Alt+arrow: move the selection mask (marquee). */
       translate_type = GIMP_TRANSFORM_TYPE_SELECTION;
     }
   else if (kevent->state & gimp_get_toggle_behavior_mask ())
     {
-      translate_type = GIMP_TRANSFORM_TYPE_PATH;
+      /* Ctrl+arrow: nudge the layer (Photoshop), from any tool.
+       * The layer-mask / channel / floating-selection target rules
+       * still apply inside translate ().
+       */
+      translate_type = GIMP_TRANSFORM_TYPE_LAYER;
+    }
+  else if (! gimp_channel_is_empty (GIMP_CHANNEL (gimp_image_get_mask (image))))
+    {
+      /* Plain arrow with a selection tool active and a selection
+       * committed: move the marquee (Photoshop mapping).  Keep
+       * moving the drawable itself when a layer mask, a channel or
+       * a floating selection is the active target, as plain arrows
+       * did before.
+       */
+      GList *selected = gimp_image_get_selected_drawables (image);
+
+      if (selected &&
+          (GIMP_IS_LAYER_MASK (selected->data) ||
+           GIMP_IS_CHANNEL (selected->data) ||
+           gimp_layer_is_floating_sel (selected->data)))
+        translate_type = GIMP_TRANSFORM_TYPE_LAYER;
+      else
+        translate_type = GIMP_TRANSFORM_TYPE_SELECTION;
+
+      g_list_free (selected);
     }
   else
     {
@@ -1207,16 +1252,14 @@ gimp_edit_selection_tool_translate (GimpTool          *tool,
       kevent->keyval != GDK_KEY_Down)
     return FALSE;
 
-  /*  adapt arrow velocity to the zoom factor when holding <shift>  */
-  velocity = (ARROW_VELOCITY /
-              gimp_zoom_model_get_factor (gimp_display_get_shell (display)->zoom));
-  velocity = MAX (1.0, velocity);
+  /*  Shift+arrow is a fixed 10 px step (Photoshop), at any zoom.  */
+  velocity = ARROW_VELOCITY;
 
   /*  check the event queue for key events with the same modifier mask
    *  as the current event, allowing only extend_mask to vary between
    *  them.
    */
-  inc_x = process_event_queue_keys (kevent,
+  inc_x = process_event_queue_keys (kevent, extend_mask,
                                     GDK_KEY_Left,
                                     kevent->state | extend_mask,
                                     -1 * velocity,
@@ -1235,7 +1278,7 @@ gimp_edit_selection_tool_translate (GimpTool          *tool,
 
                                     0);
 
-  inc_y = process_event_queue_keys (kevent,
+  inc_y = process_event_queue_keys (kevent, extend_mask,
                                     GDK_KEY_Up,
                                     kevent->state | extend_mask,
                                     -1 * velocity,

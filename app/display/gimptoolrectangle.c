@@ -55,8 +55,8 @@
 #include "gimp-intl.h"
 
 
-/*  speed of key movement  */
-#define ARROW_VELOCITY   25
+/*  speed of key movement: Shift+arrow step (Photoshop: 10 px)  */
+#define ARROW_VELOCITY   10
 
 #define MAX_HANDLE_SIZE         50
 #define MIN_HANDLE_SIZE         15

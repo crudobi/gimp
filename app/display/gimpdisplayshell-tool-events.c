@@ -55,12 +55,14 @@
 #include "widgets/gimpuimanager.h"
 #include "widgets/gimpwidgets-utils.h"
 
+#include "tools/gimpeditselectiontool.h"
 #include "tools/gimpguidetool.h"
 #include "tools/gimpmovetool.h"
 #include "tools/gimppainttool.h"
 #include "tools/gimpsamplepointtool.h"
 #include "tools/gimptoolcontrol.h"
 #include "tools/tool_manager.h"
+#include "tools/tools-enums.h"
 
 #include "gimpcanvas.h"
 #include "gimpdisplay.h"
@@ -1164,6 +1166,30 @@ gimp_display_shell_canvas_tool_events (GtkWidget        *canvas,
                   return_val = tool_manager_key_press_active (gimp,
                                                               kevent,
                                                               display);
+
+                /* Ctrl+arrow from a tool with no arrow handling
+                 * (paint, text when not editing, ...): nudge the
+                 * layer, as in Photoshop.  This must run BEFORE the
+                 * keyboard controller below: the system controllerrc
+                 * maps Ctrl+arrows to view-scroll-*-border, so the
+                 * controller would swallow the key first.  Tools
+                 * that handle the key themselves (Move, selection,
+                 * Path, Text while editing, in-progress
+                 * rectangle/line) have already returned TRUE above,
+                 * so this preserves every existing arrow behavior.
+                 * Shift+arrows (view-scroll-page) and Alt+arrows
+                 * (tool size) still fall through to the controller.
+                 */
+                if (! return_val && arrow_key &&
+                    ! gimp_image_is_empty (image) &&
+                    (kevent->state & gimp_get_toggle_behavior_mask ()))
+                  {
+                    return_val =
+                      gimp_edit_selection_tool_translate (tool_manager_get_active (gimp),
+                                                          kevent,
+                                                          GIMP_TRANSFORM_TYPE_LAYER,
+                                                          display, NULL);
+                  }
 
                 if (! return_val)
                   {
