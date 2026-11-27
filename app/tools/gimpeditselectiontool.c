@@ -45,6 +45,7 @@
 #include "core/gimplayermask.h"
 #include "core/gimpprojection.h"
 #include "core/gimpselection.h"
+#include "core/gimptoolinfo.h"
 #include "core/gimpundostack.h"
 
 #include "widgets/gimpwidgets-utils.h"
@@ -976,7 +977,14 @@ gimp_edit_selection_tool_get_selected_items (GimpEditSelectionTool *edit_select,
       break;
 
     case GIMP_TRANSLATE_MODE_LAYER:
-      selected_items = g_list_copy (gimp_image_get_selected_layers (image));
+      /*  The layer scope applies here: in Current / All-visible
+       *  mode the drag moves the scope layers, not the panel
+       *  selection.  In Selected mode this is exactly the old call
+       *  (get_selected_drawables == get_selected_layers when the
+       *  edit mode is LAYER).
+       */
+      selected_items = gimp_image_item_list_get_layer_scope (
+        image, GIMP_TOOL (edit_select)->tool_info->gimp->layer_scope);
       break;
 
     case GIMP_TRANSLATE_MODE_MASK:
@@ -1168,6 +1176,26 @@ process_event_queue_keys (GdkEventKey *kevent,
   return value;
 
 #undef FILTER_MAX_KEYS
+}
+
+static gboolean
+gimp_edit_selection_tool_items_equal (GList *list1,
+                                      GList *list2)
+{
+  /*  Same items, same order, same length.  Used for undo
+   *  compression of nudges in Current / All-visible scope, where
+   *  the nudged layers differ from the panel selection.
+   */
+  while (list1 && list2)
+    {
+      if (list1->data != list2->data)
+        return FALSE;
+
+      list1 = g_list_next (list1);
+      list2 = g_list_next (list2);
+    }
+
+  return (list1 == NULL && list2 == NULL);
 }
 
 gboolean
@@ -1392,7 +1420,27 @@ gimp_edit_selection_tool_translate (GimpTool          *tool,
         }
       else
         {
+          GimpLayerScope scope = display->gimp->layer_scope;
+
           edit_mode = GIMP_TRANSLATE_MODE_LAYER;
+
+          if (scope != GIMP_LAYER_SCOPE_SELECTED)
+            {
+              /*  Plain layers only here (mask / channel / floating
+               *  selection were handled above): nudge the scope
+               *  layers instead of the panel selection.  Locked
+               *  layers were already skipped silently by the
+               *  scope enumeration in All-visible mode; in
+               *  Current mode the lock check below still applies
+               *  to the single active layer.
+               */
+              g_list_free (selected_items);
+              selected_items =
+                gimp_image_item_list_get_layer_scope (image, scope);
+
+              if (! selected_items)
+                null_message = _("There is no layer to move.");
+            }
 
           for (iter = selected_items; iter; iter = iter->next)
             if (gimp_item_is_position_locked (iter->data, NULL))
@@ -1467,7 +1515,16 @@ gimp_edit_selection_tool_translate (GimpTool          *tool,
 
       undo_items = g_object_get_data (G_OBJECT (undo), "edit-selection-items");
 
-      if (gimp_image_equal_selected_drawables (image, undo_items))
+      /*  In Selected scope this is the same comparison as before
+       *  (selected_items == the selected drawables).  In Current /
+       *  All-visible scope the panel selection differs from the
+       *  nudged layers, so also accept the scope list itself
+       *  matching, or repeated nudges would never compress into one
+       *  undo step.  (gimp_g_list_compare cannot be used here: it
+       *  never returns 0, even for equal lists.)
+       */
+      if (gimp_image_equal_selected_drawables (image, undo_items) ||
+          gimp_edit_selection_tool_items_equal (selected_items, undo_items))
         {
           push_undo = FALSE;
         }

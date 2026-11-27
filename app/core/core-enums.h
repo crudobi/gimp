@@ -397,6 +397,23 @@ typedef enum  /*< pdb-skip >*/
 } GimpItemSet;
 
 
+/*  Layer scope for the Move and Transform tools: which layers an
+ *  operation affects.  SELECTED is the historical behavior (the
+ *  Layers panel multi-select); CURRENT is the active layer only;
+ *  VISIBLE is every effectively-visible layer in the image.
+ */
+#define GIMP_TYPE_LAYER_SCOPE (gimp_layer_scope_get_type ())
+
+GType gimp_layer_scope_get_type (void);
+
+typedef enum  /*< pdb-skip >*/
+{
+  GIMP_LAYER_SCOPE_CURRENT,  /*< desc="Current layer only" >*/
+  GIMP_LAYER_SCOPE_VISIBLE,  /*< desc="All visible layers" >*/
+  GIMP_LAYER_SCOPE_SELECTED, /*< desc="Selected layers"    >*/
+} GimpLayerScope;
+
+
 #define GIMP_TYPE_MATTING_ENGINE (gimp_matting_engine_get_type ())
 
 GType gimp_matting_engine_get_type (void);

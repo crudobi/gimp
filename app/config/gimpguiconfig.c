@@ -49,6 +49,7 @@ enum
   PROP_0,
   PROP_EDIT_NON_VISIBLE,
   PROP_MOVE_TOOL_CHANGES_ACTIVE,
+  PROP_LAYER_SCOPE_DEFAULT,
   PROP_FILTER_TOOL_MAX_RECENT,
   PROP_FILTER_TOOL_USE_LAST_SETTINGS,
   PROP_TRUST_DIRTY_FLAG,
@@ -151,6 +152,14 @@ gimp_gui_config_class_init (GimpGuiConfigClass *klass)
                             MOVE_TOOL_CHANGES_ACTIVE_BLURB,
                             FALSE,
                             GIMP_PARAM_STATIC_STRINGS);
+
+  GIMP_CONFIG_PROP_ENUM (object_class, PROP_LAYER_SCOPE_DEFAULT,
+                         "layer-scope-default",
+                         "Default layer scope",
+                         LAYER_SCOPE_DEFAULT_BLURB,
+                         GIMP_TYPE_LAYER_SCOPE,
+                         GIMP_LAYER_SCOPE_SELECTED,
+                         GIMP_PARAM_STATIC_STRINGS);
 
   GIMP_CONFIG_PROP_INT (object_class, PROP_FILTER_TOOL_MAX_RECENT,
                         "filter-tool-max-recent",
@@ -634,6 +643,9 @@ gimp_gui_config_set_property (GObject      *object,
     case PROP_MOVE_TOOL_CHANGES_ACTIVE:
       gui_config->move_tool_changes_active = g_value_get_boolean (value);
       break;
+    case PROP_LAYER_SCOPE_DEFAULT:
+      gui_config->layer_scope_default = g_value_get_enum (value);
+      break;
     case PROP_FILTER_TOOL_MAX_RECENT:
     case PROP_IMAGE_MAP_TOOL_MAX_RECENT:
       gui_config->filter_tool_max_recent = g_value_get_int (value);
@@ -817,6 +829,9 @@ gimp_gui_config_get_property (GObject    *object,
       break;
     case PROP_MOVE_TOOL_CHANGES_ACTIVE:
       g_value_set_boolean (value, gui_config->move_tool_changes_active);
+      break;
+    case PROP_LAYER_SCOPE_DEFAULT:
+      g_value_set_enum (value, gui_config->layer_scope_default);
       break;
     case PROP_FILTER_TOOL_MAX_RECENT:
     case PROP_IMAGE_MAP_TOOL_MAX_RECENT:

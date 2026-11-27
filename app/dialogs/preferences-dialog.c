@@ -1852,6 +1852,15 @@ prefs_dialog_new (Gimp       *gimp,
                                     GIMP_ICON_TOOL_MOVE,
                                     GTK_BOX (vbox2), size_group);
 
+  /*  Default layer scope: what a fresh session starts with.  The
+   *  session scope itself is changed with the layer-scope toggle.
+   */
+  grid = prefs_grid_new (GTK_CONTAINER (vbox2));
+
+  prefs_enum_combo_box_add (object, "layer-scope-default", 0, 0,
+                            _("Default layer _scope:"),
+                            GTK_GRID (grid), 0, size_group);
+
   g_clear_object (&size_group);
 
 

@@ -309,5 +309,15 @@ gimp_transform_options_gui (GimpToolOptions *tool_options,
       gtk_box_pack_start (GTK_BOX (vbox), combo, FALSE, FALSE, 0);
     }
 
+  /*  layer scope: which layers Transform (and Move) affect.
+   *  Bound to the session scope on the Gimp object, so the
+   *  'u' toggle and this combo always show the same mode.
+   */
+  combo = gimp_prop_enum_combo_box_new (G_OBJECT (context->gimp),
+                                        "layer-scope", 0, 0);
+  gimp_int_combo_box_set_label (GIMP_INT_COMBO_BOX (combo), _("Layer scope"));
+  g_object_set (combo, "ellipsize", PANGO_ELLIPSIZE_END, NULL);
+  gtk_box_pack_start (GTK_BOX (vbox), combo, FALSE, FALSE, 0);
+
   return vbox;
 }

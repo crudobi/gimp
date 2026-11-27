@@ -349,6 +349,11 @@ _("When enabled, non-visible layers can be edited as normal.")
 _("If enabled, the move tool sets the edited layer or path as active.  " \
   "This used to be the default behavior in older versions.")
 
+#define LAYER_SCOPE_DEFAULT_BLURB \
+_("Default layer scope for the Move and Transform tools: which layers " \
+  "an operation affects at the start of a session.  The scope can " \
+  "still be changed for the session with the layer-scope toggle.")
+
 #define MYPAINT_BRUSH_PATH_BLURB \
 "Sets the brush search path."
 

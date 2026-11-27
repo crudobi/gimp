@@ -132,6 +132,53 @@ tools_transform_duplicate_cmd_callback (GimpAction *action,
 }
 
 void
+tools_layer_scope_cycle_cmd_callback (GimpAction *action,
+                                      GVariant   *value,
+                                      gpointer    data)
+{
+  Gimp           *gimp;
+  GimpDisplay    *display;
+  GimpLayerScope  scope;
+  const gchar    *scope_name;
+
+  return_if_no_gimp (gimp, data);
+
+  /*  Cycle Current -> All visible -> Selected -> Current.  Only the
+   *  session scope changes; the "layer-scope-default" setting (what
+   *  a fresh session starts with) is untouched.
+   */
+  scope = gimp->layer_scope + 1;
+
+  if (scope > GIMP_LAYER_SCOPE_SELECTED)
+    scope = GIMP_LAYER_SCOPE_CURRENT;
+
+  g_object_set (gimp, "layer-scope", scope, NULL);
+
+  switch (scope)
+    {
+    case GIMP_LAYER_SCOPE_CURRENT:
+      scope_name = _("Current layer only");
+      break;
+    case GIMP_LAYER_SCOPE_VISIBLE:
+      scope_name = _("All visible layers");
+      break;
+    case GIMP_LAYER_SCOPE_SELECTED:
+    default:
+      scope_name = _("Selected layers");
+      break;
+    }
+
+  display = action_data_get_display (data);
+
+  /*  Show the new scope in the active display's status bar instead
+   *  of a modal dialog, so cycling the scope never blocks the user.
+   *  With no active display, gimp_message() falls back to a dialog.
+   */
+  gimp_message (gimp, G_OBJECT (display), GIMP_MESSAGE_INFO,
+                _("Layer scope: %s"), scope_name);
+}
+
+void
 tools_select_cmd_callback (GimpAction *action,
                            GVariant   *value,
                            gpointer    data)

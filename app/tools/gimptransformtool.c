@@ -683,7 +683,30 @@ gimp_transform_tool_get_selected_objects (GimpTransformTool  *tr_tool,
   switch (options->type)
     {
     case GIMP_TRANSFORM_TYPE_LAYER:
-      objects = gimp_image_get_selected_drawables (image);
+      {
+        GimpLayerScope  scope     = display->gimp->layer_scope;
+        GList           *drawables = gimp_image_get_selected_drawables (image);
+
+        /*  A layer mask, a channel or a floating selection is a
+         *  singular target: the scope never applies to it.  Plain
+         *  layers transform as the scope says (in Selected scope
+         *  this is exactly the old call).  Bounds, preview,
+         *  confirm and commit all flow through this function, so
+         *  they follow the scope with no further changes.
+         */
+        if (drawables &&
+            (GIMP_IS_LAYER_MASK (drawables->data) ||
+             GIMP_IS_CHANNEL (drawables->data) ||
+             gimp_layer_is_floating_sel (drawables->data)))
+          {
+            objects = drawables;
+          }
+        else
+          {
+            g_list_free (drawables);
+            objects = gimp_image_item_list_get_layer_scope (image, scope);
+          }
+      }
       break;
 
     case GIMP_TRANSFORM_TYPE_SELECTION:

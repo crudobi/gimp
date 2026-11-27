@@ -136,6 +136,13 @@ struct _Gimp
 
   /*  GUI focus occured. See gtk#7534.  */
   gboolean                focused_once;
+
+  /*  Session layer scope for the Move and Transform tools
+   *  (GIMP_LAYER_SCOPE_*).  Changed for the session by the
+   *  layer-scope toggle; initialized from the "layer-scope-default"
+   *  GUI config at startup.  Never serialized.
+   */
+  GimpLayerScope          layer_scope;
 };
 
 struct _GimpClass

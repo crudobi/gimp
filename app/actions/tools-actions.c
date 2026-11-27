@@ -63,7 +63,17 @@ static const GimpActionEntry tools_actions[] =
     NC_("tools-action", "_Duplicate and Transform"), NULL, { NULL },
     NC_("tools-action", "Duplicate the selected layers and transform the copy"),
     tools_transform_duplicate_cmd_callback,
-    GIMP_HELP_TOOL_UNIFIED_TRANSFORM }
+    GIMP_HELP_TOOL_UNIFIED_TRANSFORM },
+
+  /*  No accelerator here: the 'u' binding is added centrally with
+   *  the shortcutsrc update (verified free in the fork keymap and
+   *  both live profiles).
+   */
+  { "tools-layer-scope-cycle", GIMP_ICON_TOOL_MOVE,
+    NC_("tools-action", "Cycle Layer _Scope"), NULL, { NULL },
+    NC_("tools-action", "Cycle which layers Move and Transform affect: current layer only, all visible layers, selected layers"),
+    tools_layer_scope_cycle_cmd_callback,
+    GIMP_HELP_TOOL_MOVE }
 };
 
 static const GimpStringActionEntry tools_alternative_actions[] =

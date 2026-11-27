@@ -42,6 +42,7 @@ struct _GimpGuiConfig
 
   gboolean             edit_non_visible;
   gboolean             move_tool_changes_active;
+  GimpLayerScope       layer_scope_default;
   gint                 filter_tool_max_recent;
   gboolean             filter_tool_use_last_settings;
   gboolean             trust_dirty_flag;

@@ -37,6 +37,7 @@
 #include "core/gimpdrawable.h"
 #include "core/gimpguide.h"
 #include "core/gimpimage.h"
+#include "core/gimpimage-item-list.h"
 #include "core/gimpimage-pick-item.h"
 #include "core/gimpitem.h"
 #include "core/gimplayer.h"
@@ -246,6 +247,8 @@ gimp_move_tool_button_press (GimpTool            *tool,
         {
           GList     *guides;
           GimpLayer *layer;
+          gboolean   scope_mode =
+            (display->gimp->layer_scope != GIMP_LAYER_SCOPE_SELECTED);
 
           if (gimp_display_shell_get_show_guides (shell) &&
               (guides = gimp_image_pick_guides (image,
@@ -277,7 +280,7 @@ gimp_move_tool_button_press (GimpTool            *tool,
 
                   return;
                 }
-              else
+              else if (! scope_mode)
                 {
                   GList *new_selected_layers = g_list_prepend (NULL, layer);
 
@@ -286,13 +289,21 @@ gimp_move_tool_button_press (GimpTool            *tool,
                   gimp_image_set_selected_layers (image, new_selected_layers);
                   g_list_free (new_selected_layers);
                 }
+              /*  Scope mode: the pick above only decided the
+               *  guide / floating-selection handling.  The drag
+               *  moves the scope layers, not the picked layer, so
+               *  the selection is left alone.
+               */
             }
-          else
+          else if (! scope_mode)
             {
               /*  no guide and no layer picked  */
 
               return;
             }
+          /*  Scope mode with no layer under the cursor: fall
+           *  through; the drag still moves the scope layers.
+           */
         }
     }
 
@@ -348,7 +359,27 @@ gimp_move_tool_button_press (GimpTool            *tool,
 
     case GIMP_TRANSFORM_TYPE_LAYER:
       {
-        selected_items = gimp_image_get_selected_drawables (image);
+        GimpLayerScope  scope     = display->gimp->layer_scope;
+        GList           *drawables = gimp_image_get_selected_drawables (image);
+
+        /*  A layer mask, a channel or a floating selection is a
+         *  singular target: the scope never applies to it.  Plain
+         *  layers move as the scope says (in Selected scope this
+         *  is exactly the old call).
+         */
+        if (drawables &&
+            (GIMP_IS_LAYER_MASK (drawables->data) ||
+             GIMP_IS_CHANNEL (drawables->data) ||
+             gimp_layer_is_floating_sel (drawables->data)))
+          {
+            selected_items = drawables;
+          }
+        else
+          {
+            g_list_free (drawables);
+            selected_items =
+              gimp_image_item_list_get_layer_scope (image, scope);
+          }
 
         if (! selected_items)
           {
@@ -876,7 +907,12 @@ gimp_move_tool_cursor_update (GimpTool         *tool,
     }
   else if (options->move_current)
     {
-      GList *items   = gimp_image_get_selected_drawables (image);
+      /*  Scope-aware like the drag itself: in Current / All-visible
+       *  mode the cursor reflects whether any scope layer can move.
+       *  In Selected scope this is exactly the old call.
+       */
+      GList *items = gimp_image_item_list_get_layer_scope (
+        image, display->gimp->layer_scope);
       GList *iter;
       gint   n_items = 0;
 

@@ -56,4 +56,7 @@ GList    * gimp_image_item_list_get_list  (GimpImage              *image,
                                            GimpItemTypeMask        type,
                                            GimpItemSet             set);
 
+GList    * gimp_image_item_list_get_layer_scope (GimpImage        *image,
+                                                 GimpLayerScope    scope);
+
 GList    * gimp_image_item_list_filter    (GList                  *list);

@@ -25,6 +25,7 @@
 #include "core-types.h"
 
 #include "gimpchannel.h"
+#include "gimpcontainer.h"
 #include "gimpcontext.h"
 #include "gimpimage.h"
 #include "gimpimage-item-list.h"
@@ -358,6 +359,132 @@ gimp_image_item_list_get_list (GimpImage        *image,
     }
 
   return g_list_reverse (return_list);
+}
+
+/*  Collect the visible, unlocked leaf layers under @item into @list.
+ *  Groups expand to their visible children; a group itself is never
+ *  returned.  Effective visibility is used, so children of a hidden
+ *  group are excluded.  Position- or content-locked layers are
+ *  skipped silently.  A floating selection is not a layer for this
+ *  purpose and is never returned.
+ */
+static void
+gimp_image_item_list_add_visible_layers (GimpItem  *item,
+                                         GList    **list)
+{
+  GimpContainer *children;
+
+  children = gimp_viewable_get_children (GIMP_VIEWABLE (item));
+
+  if (children)
+    {
+      gint n_children = gimp_container_get_n_children (children);
+      gint i;
+
+      for (i = 0; i < n_children; i++)
+        {
+          GimpItem *child =
+            GIMP_ITEM (gimp_container_get_child_by_index (children, i));
+
+          gimp_image_item_list_add_visible_layers (child, list);
+        }
+    }
+  else if (GIMP_IS_LAYER (item) &&
+           ! gimp_layer_is_floating_sel (GIMP_LAYER (item)) &&
+           gimp_item_is_visible (item) &&
+           ! gimp_item_is_position_locked (item, NULL) &&
+           ! gimp_item_is_content_locked (item, NULL))
+    {
+      *list = g_list_prepend (*list, item);
+    }
+}
+
+/**
+ * gimp_image_item_list_get_layer_scope:
+ * @image: An #GimpImage.
+ * @scope: Which layers the caller wants.
+ *
+ * Returns the layers a Move or Transform operation should affect
+ * for @scope, as a newly allocated #GList the caller owns:
+ *
+ * - %GIMP_LAYER_SCOPE_CURRENT: the active layer only (the head of
+ *   the selected layers; a group expands to its visible, unlocked
+ *   children);
+ * - %GIMP_LAYER_SCOPE_VISIBLE: every effectively-visible layer in
+ *   the image, groups expanded to their visible children, locked
+ *   layers skipped silently;
+ * - %GIMP_LAYER_SCOPE_SELECTED: the selected drawables, as
+ *   gimp_image_get_selected_drawables() returns them.
+ *
+ * Returns: The list of layers.
+ **/
+GList *
+gimp_image_item_list_get_layer_scope (GimpImage      *image,
+                                      GimpLayerScope  scope)
+{
+  GList *list = NULL;
+
+  g_return_val_if_fail (GIMP_IS_IMAGE (image), NULL);
+
+  switch (scope)
+    {
+    case GIMP_LAYER_SCOPE_CURRENT:
+      {
+        GList *selected = gimp_image_get_selected_layers (image);
+
+        if (selected)
+          {
+            GimpItem *active = selected->data;
+
+            if (gimp_viewable_get_children (GIMP_VIEWABLE (active)))
+              {
+                gimp_image_item_list_add_visible_layers (active, &list);
+
+                list = g_list_reverse (list);
+              }
+            else
+              {
+                list = g_list_prepend (NULL, active);
+              }
+          }
+      }
+      break;
+
+    case GIMP_LAYER_SCOPE_VISIBLE:
+      {
+        /*  Iterate the TOP-LEVEL layers only.  gimp_image_get_layer_list()
+         *  flattens groups (it returns the group and every descendant),
+         *  so iterating it would add group children twice: once from the
+         *  recursion into the group, once as a list entry of their own.
+         *  A child listed twice is translated twice by the drag / nudge
+         *  path (verified live: group children moved 2x the drag
+         *  distance).  The recursion in add_visible_layers() handles
+         *  descendants.
+         */
+        GimpContainer *layers = gimp_image_get_layers (image);
+        gint           n_children;
+        gint           i;
+
+        n_children = gimp_container_get_n_children (layers);
+
+        for (i = 0; i < n_children; i++)
+          {
+            GimpItem *item =
+              GIMP_ITEM (gimp_container_get_child_by_index (layers, i));
+
+            gimp_image_item_list_add_visible_layers (item, &list);
+          }
+
+        list = g_list_reverse (list);
+      }
+      break;
+
+    case GIMP_LAYER_SCOPE_SELECTED:
+      list = gimp_image_get_selected_drawables (image);
+      break;
+    }
+
+  return list;
 }
 
 static GList *

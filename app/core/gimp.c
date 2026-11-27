@@ -107,7 +107,8 @@ enum
 enum
 {
   PROP_0,
-  PROP_VERBOSE
+  PROP_VERBOSE,
+  PROP_LAYER_SCOPE
 };
 
 
@@ -234,6 +235,12 @@ gimp_class_init (GimpClass *klass)
                                                          FALSE,
                                                          GIMP_PARAM_READWRITE |
                                                          G_PARAM_CONSTRUCT_ONLY));
+
+  g_object_class_install_property (object_class, PROP_LAYER_SCOPE,
+                                   g_param_spec_enum ("layer-scope", NULL, NULL,
+                                                      GIMP_TYPE_LAYER_SCOPE,
+                                                      GIMP_LAYER_SCOPE_SELECTED,
+                                                      GIMP_PARAM_READWRITE));
 }
 
 static void
@@ -249,6 +256,7 @@ gimp_init (Gimp *gimp)
   gimp->show_playground  = FALSE;
   gimp->stack_trace_mode = GIMP_STACK_TRACE_NEVER;
   gimp->pdb_compat_mode  = GIMP_PDB_COMPAT_OFF;
+  gimp->layer_scope      = GIMP_LAYER_SCOPE_SELECTED;
 
   gimp_gui_init (gimp);
 
@@ -349,6 +357,10 @@ gimp_set_property (GObject           *object,
       gimp->be_verbose = g_value_get_boolean (value);
       break;
 
+    case PROP_LAYER_SCOPE:
+      gimp->layer_scope = g_value_get_enum (value);
+      break;
+
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -367,6 +379,10 @@ gimp_get_property (GObject    *object,
     {
     case PROP_VERBOSE:
       g_value_set_boolean (value, gimp->be_verbose);
+      break;
+
+    case PROP_LAYER_SCOPE:
+      g_value_set_enum (value, gimp->layer_scope);
       break;
 
     default:
@@ -786,6 +802,13 @@ gimp_load_config (Gimp  *gimp,
                         gimp->be_verbose);
 
   gimp->config = GIMP_CORE_CONFIG (gimprc);
+
+  /*  The session layer scope starts at the configured default; the
+   *  toggle (tools-layer-scope-cycle) changes it for the session
+   *  without touching the default.
+   */
+  if (GIMP_IS_GUI_CONFIG (gimp->config))
+    gimp->layer_scope = GIMP_GUI_CONFIG (gimp->config)->layer_scope_default;
 
   gimp->edit_config = gimp_config_duplicate (GIMP_CONFIG (gimp->config));
 
